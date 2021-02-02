@@ -27,10 +27,25 @@ Download all the codes held in this repo.
 ```
 git clone https://github.com/birlrobotics/ITER_KER_GER.git
 ```
-Finally, please copy the files held in folder `ITER_KER_GER/her` and paste into `baselines/baselines/` to overwrite the vanilla `HER` file.
+Copy the files held in folder `ITER_KER_GER/her` and paste into `baselines/baselines/` to overwrite the vanilla `HER` and relative files.
 ```
 cp -rf her ~/baselines/baselines/
 ```
+```
+cp -f her/run.py ~/baselines/baselines
+```
+```
+cp -f her/cmd_util.py ~/baselines/baselines/common
+```
+
+Finally, install the tensorflow 1.14.0, mpi4py, ipdb, tensorboardX.
+```
+conda install tensorflow==1.14.0, mpi4py
+```
+```
+conda install -c conda-forge ipdb, tensorboardX
+```
+
 ## Usage
 
 To reproduce the best result in our paper, please run :
