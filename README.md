@@ -2,6 +2,10 @@
 
 ## Description
 
+
+python -m baselines.run --alg=her --env=FetchPickAndPlace-v1 --num_timesteps=1e6 --n_cycles=10 --save_path=/ITER_KER_GER/policies/her/iter --log_path=/ITER_KER_GER/log_data/her/iter --before_GER_minibatch_size=256 --n_KER=8 --n_GER=4
+
+
 This repo refers to the paper [*Invariant Transform Experience Replay: Data Augmentation for Deep Reinforcement Learning*](https://arxiv.org/abs/1909.10707#). This repo would be open source once our paper gets accepted.
 
 Deep reinforcement learning (DRL) is a promising approach for adaptive robot control, but its current application to robotics is currently hindered by high sample requirements. We propose two novel data augmentation techniques for DRL based on invariant transformations of trajectories in order to reuse more efficiently observed interaction. The first one called Kaleidoscope Experience Replay exploits reflectional symmetries, while the second called Goal-augmented Experience Replay takes advantage of lax goal definitions. In the Fetch tasks from OpenAI Gym, our experimental results show a large increase in learning speed.
