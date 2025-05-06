@@ -1,1 +1,0 @@
-Logging to /home/grazvy/PycharmProjects/ITER_KER_GER/log_data/her/iter/24_Fri_Dec_06_17:07:58:344126
