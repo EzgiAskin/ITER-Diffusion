@@ -282,6 +282,26 @@ class DDPG(object):
             # minibatch_for_KER = 256, self.batch_size = 1024, self.n_GER =3
             transitions = self.buffer.sample(minibatch_for_KER,env_name=self.env_name, n_GER=self.n_GER,err_distance=self.err_distance) #otherwise only sample from primary buffer
 
+        ###############################################
+        # print("[DEBUG] Adding fake data to batch...")
+        # fake_data = self.buffer.sample_fake_data(self.batch_size // 2)
+        # for key, value in fake_data.items():
+        #     if key in transitions:
+        #         transitions[key] = np.concatenate([transitions[key], value], axis=0)
+        #     else:
+        #         transitions[key] = value
+        ###############################################
+        # Verification
+        total_samples = len(transitions['r'])
+        # is_fake = transitions['is_fake']
+        # num_fake = np.sum(is_fake)
+        # num_real = total_samples - num_fake
+        print(f"[DEBUG] Total samples: {total_samples}")
+        # todo mark synthesized data and compare trajectory quality
+        # todo do this every second epoch etc.
+        # todo make sure the demo buffer is not manipulated
+        # todo create an option for the replay buffer to be "diffused" or not
+
         o, o_2, g = transitions['o'], transitions['o_2'], transitions['g']
         ag, ag_2 = transitions['ag'], transitions['ag_2']
         transitions['o'], transitions['g'] = self._preprocess_og(o, ag, g)
