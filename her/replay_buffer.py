@@ -53,6 +53,24 @@ class ReplayBuffer:
 
         return transitions
 
+    def sample_fake_data(self, batch_size):
+        """Samples fake data by duplicating half of the sampled transitions.
+           Todo Serves as a basis for diffusion integration later on.
+           Todo customise the ratio as a parameter
+           Todo dont sample the first half but rather sample randomly from synthetic data
+        """
+        transitions = self.sample(batch_size)
+
+        # Mark the transitions as fake and duplicate data
+        for key in transitions.keys():
+            half_size = len(transitions[key]) // 2
+            transitions[key] = np.concatenate(
+                [transitions[key][:half_size], transitions[key][:half_size]], axis=0)
+
+        transitions['is_fake'] = np.array([True] * len(transitions['r']))
+        return transitions
+
+
     def store_episode(self, episode_batch):
         """episode_batch: array(batch_size x (T or T+1) x dim_key)
         """
