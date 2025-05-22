@@ -4,6 +4,7 @@ import click
 import numpy as np
 import json
 from mpi4py import MPI
+from scipy.linalg import sqrtm
 
 from baselines import logger
 from baselines.common import set_global_seeds, tf_util
@@ -13,9 +14,14 @@ from baselines.her.rollout import RolloutWorker
 from ipdb import set_trace
 from tensorboardX import SummaryWriter
 from baselines.her.ker_learning_method import SINGLE_SUC_RATE_THRESHOLD,IF_CLEAR_BUFFER
+from baselines.her.ddpm_temporal import DDPM_Temporal
+from baselines.her.util import (
+    import_function, store_args, flatten_grads, transitions_in_episode_batch, convert_episode_to_batch_major)
+from baselines.her.replay_buffer import ReplayBuffer
 
 
 writer = SummaryWriter()
+
 
 
 def mpi_average(value):
@@ -24,6 +30,120 @@ def mpi_average(value):
     if not any(value):
         value = [0.]
     return mpi_moments(np.array(value))[0]
+
+def compute_success_rate(buffer, source='all'):
+    """
+    Compute the average success rate per episode for real or synthetic data
+    """
+    flags = buffer.synthetic_flags[:buffer.current_size]
+    if source == 'real':
+        available_idxs = np.where(~flags)[0]
+    elif source == 'synthetic':
+        available_idxs = np.where(flags)[0]
+    else:
+        available_idxs = np.arange(buffer.current_size)
+
+    num_available = len(available_idxs)
+    if num_available == 0:
+        return float('nan'), float('nan')
+
+    episodes = buffer.sample_episodes(num_available, source=source)
+    rates = [ep['info_is_success'].mean() for ep in episodes]
+    return np.mean(rates), np.std(rates)
+
+
+def compute_feature_statistics(buffer, feature='o', source='all'):
+    """
+    Compute mean and covariance of a feature (e.g., states 'o' or actions 'u')
+    across all timesteps and episodes.
+    """
+    flags = buffer.synthetic_flags[:buffer.current_size]
+    if source == 'real':
+        available_idxs = np.where(~flags)[0]
+    elif source == 'synthetic':
+        available_idxs = np.where(flags)[0]
+    else:
+        available_idxs = np.arange(buffer.current_size)
+
+    if len(available_idxs) == 0:
+        return None, None
+
+    data = []
+    for idx in available_idxs:
+        ep = {key: buffer.buffers[key][idx] for key in buffer.buffers}
+        feat = ep[feature]
+        data.append(feat.reshape(-1, feat.shape[-1]))
+    data = np.vstack(data)
+
+    mean = np.mean(data, axis=0)
+    cov = np.cov(data, rowvar=False)
+    return mean, cov
+
+
+def kl_divergence_gaussian(mean1, cov1, mean2, cov2):
+    """
+    Compute the Kullback-Leibler (KL) divergence between two multivariate Gaussian distributions.
+
+    Parameters:
+    - mean1, cov1: Mean and covariance of the first distribution.
+    - mean2, cov2: Mean and covariance of the second distribution.
+
+    Returns:
+    - KL divergence value (float).
+    """
+    dim = mean1.shape[0]
+    inv_cov2 = np.linalg.inv(cov2 + np.eye(dim) * 1e-8)
+    diff = mean2 - mean1
+    term1 = np.trace(inv_cov2 @ cov1)
+    term2 = diff.T @ inv_cov2 @ diff
+    term3 = np.log((np.linalg.det(cov2) + 1e-8) / (np.linalg.det(cov1) + 1e-8))
+    return 0.5 * (term1 + term2 - dim + term3)
+
+def frechet_inception_distance(mean1, cov1, mean2, cov2):
+    """
+       Compute the Fréchet Inception Distance (FID) between two multivariate Gaussians.
+
+       Parameters:
+       - mean1, cov1: Mean and covariance of the first distribution.
+       - mean2, cov2: Mean and covariance of the second distribution.
+
+       Returns:
+       - FID value (float).
+    """
+    diff = mean1 - mean2
+    cov_sqrt, _ = sqrtm(cov1 @ cov2, disp=False)
+    if np.iscomplexobj(cov_sqrt):
+        cov_sqrt = cov_sqrt.real
+    fid = diff.dot(diff) + np.trace(cov1 + cov2 - 2 * cov_sqrt)
+    return np.real(fid)
+
+def evaluate_buffer(buffer, features=('o', 'u', 'ag', 'g')):
+    """
+    Compute metrics comparing real and synthetic episodes:
+      - success rates
+      - KL & FID for each feature in `features`
+    Returns a flat dict with keys like 'kl_o', 'fid_o', etc.
+    """
+    metrics = {}
+    real_sr, real_sr_std = compute_success_rate(buffer, source='real')
+    syn_sr, syn_sr_std   = compute_success_rate(buffer, source='synthetic')
+    metrics['success_rate'] = {
+        'real_mean': real_sr, 'real_std': real_sr_std,
+        'synthetic_mean': syn_sr, 'synthetic_std': syn_sr_std
+    }
+
+    for feat in features:
+        mu_r, cov_r = compute_feature_statistics(buffer, feature=feat, source='real')
+        mu_s, cov_s = compute_feature_statistics(buffer, feature=feat, source='synthetic')
+
+        if mu_r is None or mu_s is None:
+            metrics[f'kl_{feat}']  = None
+            metrics[f'fid_{feat}'] = None
+        else:
+            metrics[f'kl_{feat}']  = kl_divergence_gaussian(mu_r, cov_r, mu_s, cov_s)
+            metrics[f'fid_{feat}'] = frechet_inception_distance(mu_r, cov_r, mu_s, cov_s)
+
+    return metrics
 
 
 def train(*, policy, rollout_worker, evaluator,
@@ -42,27 +162,20 @@ def train(*, policy, rollout_worker, evaluator,
     if policy.bc_loss == 1: policy.init_demo_buffer(demo_file) #initialize demo buffer if training with demonstrations
 
     # num_timesteps = n_epochs * n_cycles * rollout_length * number of rollout workers
-
-    # prepare the param for training on KER
     n_KER_number = n_KER
     first_time_enter = True
     test_suc_rate = 0
     single_suc_rate_threshold = SINGLE_SUC_RATE_THRESHOLD
     terminate_ker_now = False
     if_clear_buffer = False
-    for epoch in range(n_epochs):
-        # train
-        
-        # #Terminate KER during training or not 
-        # if (single_suc_rate_threshold is not None) and (n_KER_number !=0):
-        #     # int(xxx*10) to get rid of the float, and just enter once to terminate KER.
-        #     if (int(test_suc_rate*10) == int(single_suc_rate_threshold*10) ) and first_time_enter:
-        #         first_time_enter = False
-        #         if_clear_buffer = IF_CLEAR_BUFFER
-        #         terminate_ker_now = True
 
+    # Initialize DDPM todo parameterize this
+    dims = policy.input_dims
+    ddpm = DDPM_Temporal(policy.buffer, time_steps=100, beta_start=1e-4, beta_end=2e-2, tol=0.1)
+
+    for epoch in range(n_epochs):
         rollout_worker.clear_history()
-        for _ in range(n_cycles):
+        for cycle in range(n_cycles):
             # generate episodes
             episodes = rollout_worker.generate_rollouts(terminate_ker=terminate_ker_now)
             # with KER
@@ -75,7 +188,42 @@ def train(*, policy, rollout_worker, evaluator,
                 policy.store_episode(episodes)
                 # HER/DDPG do not need clear buffer
                 if_clear_buffer = False
-            
+
+            # Train only on last cycle of every epoch; after a certain epoch
+            if cycle == n_cycles - 1 and epoch > 150:
+                # Train DDPM on real episodes only
+                real_eps = policy.buffer.sample_episodes(num_episodes=500, source='real')
+                ddpm_losses = ddpm.train_ddpm(real_eps, batch_size=64, epochs=10,  return_losses=True)
+                # Log ddpm loss
+                logger.record_tabular('ddpm/loss_mean', np.mean(ddpm_losses))
+                logger.record_tabular('ddpm/loss_std', np.std(ddpm_losses))
+                # Log buffer stats
+                buffer_stats = policy.buffer.get_buffer_stats()
+                logger.record_tabular('buffer/episode_capacity', buffer_stats['episode_capacity'])
+                logger.record_tabular('buffer/current_episodes', buffer_stats['current_episodes'])
+                logger.record_tabular('buffer/transitions_stored', buffer_stats['transitions_stored'])
+                logger.record_tabular('buffer/real_eps', buffer_stats['real_episodes'])
+                logger.record_tabular('buffer/synth_eps', buffer_stats['synthetic_episodes'])
+
+                if epoch % 20 == 0 and epoch > 200:
+                    # Generate, tag and store synthetic episodes
+                    ddpm.generate_and_store_synthetic_data(num_synthetic_episodes=1000)
+
+                    # Log evaluation metrics for the ddpm
+                    metrics = evaluate_buffer(policy.buffer)
+                    sr = metrics['success_rate']
+                    for feat in ('o', 'u', 'ag', 'g'):
+                        kl = metrics[f'kl_{feat}']
+                        fid = metrics[f'fid_{feat}']
+                        if kl is not None:
+                            logger.record_tabular(f'ddpm/kl_{feat}', kl)
+                            logger.record_tabular(f'ddpm/fid_{feat}', fid)
+
+                    logger.record_tabular('ddpm/real_sr_mean', sr['real_mean'])
+                    logger.record_tabular('ddpm/real_sr_std', sr['real_std'])
+                    logger.record_tabular('ddpm/synth_sr_mean', sr['synthetic_mean'])
+                    logger.record_tabular('ddpm/synth_sr_std', sr['synthetic_std'])
+
             for _ in range(n_batches):
                 policy.train()
             policy.update_target_net()
