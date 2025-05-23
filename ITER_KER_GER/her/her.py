@@ -148,7 +148,7 @@ def evaluate_buffer(buffer, features=('o', 'u', 'ag', 'g')):
 
 def train(*, policy, rollout_worker, evaluator,
           n_epochs, n_test_rollouts, n_cycles, n_batches, policy_save_interval,
-          save_path, demo_file, env_name,n_KER, **kwargs):
+          save_path, demo_file, env_name,n_KER, ddpm, **kwargs):
     rank = MPI.COMM_WORLD.Get_rank()
 
     if save_path:
@@ -169,9 +169,7 @@ def train(*, policy, rollout_worker, evaluator,
     terminate_ker_now = False
     if_clear_buffer = False
 
-    # Initialize DDPM todo parameterize this
     dims = policy.input_dims
-    ddpm = DDPM_Temporal(policy.buffer, time_steps=100, beta_start=1e-4, beta_end=2e-2, tol=0.1)
 
     for epoch in range(n_epochs):
         rollout_worker.clear_history()
@@ -285,6 +283,8 @@ def learn(*, network, env, total_timesteps,
     before_GER_minibatch_size = None,
     n_GER = 0,
     err_distance=0.05,
+    ddpm_time_steps = 100,
+    ddpm_tol = 0.05,
     **kwargs
 ):
 
@@ -333,6 +333,14 @@ def learn(*, network, env, total_timesteps,
     dims = config.configure_dims(params)
     policy = config.configure_ddpg(dims=dims, params=params, clip_return=clip_return,
                                     n_GER=n_GER,err_distance=err_distance,env_name=env_name)
+
+    ddpm = DDPM_Temporal(policy.buffer, time_steps=ddpm_time_steps, tol=ddpm_tol)
+    logger.info()
+    logger.info("=== DDPM Configuration ===")
+    logger.info(" time_steps: ", ddpm_time_steps)
+    logger.info(" tolerance: ", ddpm_tol)
+    logger.info("==========================")
+
     if load_path is not None:
         tf_util.load_variables(load_path)
 
@@ -368,7 +376,7 @@ def learn(*, network, env, total_timesteps,
         save_path=save_path, policy=policy, rollout_worker=rollout_worker,
         evaluator=evaluator, n_epochs=n_epochs, n_test_rollouts=params['n_test_rollouts'],
         n_cycles=params['n_cycles'], n_batches=params['n_batches'],
-        policy_save_interval=policy_save_interval, demo_file=demo_file,env_name=env_name, n_KER = n_KER)
+        policy_save_interval=policy_save_interval, demo_file=demo_file,env_name=env_name, n_KER = n_KER, ddpm=ddpm)
 
 
 @click.command()

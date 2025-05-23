@@ -175,6 +175,10 @@ def common_arg_parser():
     parser.add_argument('--n_KER', type=int, default=0)
     parser.add_argument('--before_GER_minibatch_size', type=int, default=None)
     parser.add_argument('--n_GER', type=int, default=0)
+
+    # Added for data augmentation with ITER-Diffusion
+    parser.add_argument('--ddpm_time_steps', type=int, default=100, help='Number of diffusion steps')
+    parser.add_argument('--ddpm_tol', type=float, default=0.1, help='Tolerance threshold for success categorization')
     return parser
 
 def robotics_arg_parser():

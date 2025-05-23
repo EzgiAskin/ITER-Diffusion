@@ -78,10 +78,12 @@ def train(args, extra_args):
         env=env,
         seed=seed,
         total_timesteps=total_timesteps,
-        save_path = args.save_path,
-        n_KER = args.n_KER,
-        before_GER_minibatch_size = args.before_GER_minibatch_size,
-        n_GER = args.n_GER,
+        save_path=args.save_path,
+        n_KER=args.n_KER,
+        before_GER_minibatch_size=args.before_GER_minibatch_size,
+        n_GER=args.n_GER,
+        ddpm_time_steps=args.ddpm_time_steps,
+        ddpm_tol=args.ddpm_tol,
         **alg_kwargs
     )
 
