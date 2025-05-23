@@ -148,7 +148,10 @@ def evaluate_buffer(buffer, features=('o', 'u', 'ag', 'g')):
 
 def train(*, policy, rollout_worker, evaluator,
           n_epochs, n_test_rollouts, n_cycles, n_batches, policy_save_interval,
-          save_path, demo_file, env_name,n_KER, ddpm, **kwargs):
+          save_path, demo_file, env_name,n_KER,
+          ddpm, ddpm_train_start, ddpm_aug_start, ddpm_aug_freq, ddpm_n_train_sample,
+          ddpm_n_synth, **kwargs):
+
     rank = MPI.COMM_WORLD.Get_rank()
 
     if save_path:
@@ -188,10 +191,10 @@ def train(*, policy, rollout_worker, evaluator,
                 if_clear_buffer = False
 
             # Train only on last cycle of every epoch; after a certain epoch
-            if cycle == n_cycles - 1 and epoch > 150:
+            if cycle == n_cycles - 1 and epoch >= ddpm_train_start:
                 # Train DDPM on real episodes only
-                real_eps = policy.buffer.sample_episodes(num_episodes=500, source='real')
-                ddpm_losses = ddpm.train_ddpm(real_eps, batch_size=64, epochs=10,  return_losses=True)
+                real_eps = policy.buffer.sample_episodes(num_episodes=ddpm_n_train_sample, source='real')
+                ddpm_losses = ddpm.train_ddpm(real_eps, batch_size=64, epochs=10, return_losses=True)
                 # Log ddpm loss
                 logger.record_tabular('ddpm/loss_mean', np.mean(ddpm_losses))
                 logger.record_tabular('ddpm/loss_std', np.std(ddpm_losses))
@@ -203,9 +206,9 @@ def train(*, policy, rollout_worker, evaluator,
                 logger.record_tabular('buffer/real_eps', buffer_stats['real_episodes'])
                 logger.record_tabular('buffer/synth_eps', buffer_stats['synthetic_episodes'])
 
-                if epoch % 20 == 0 and epoch > 200:
+                if epoch % ddpm_aug_freq == 0 and epoch >= ddpm_aug_start:
                     # Generate, tag and store synthetic episodes
-                    ddpm.generate_and_store_synthetic_data(num_synthetic_episodes=1000)
+                    ddpm.generate_and_store_synthetic_data(num_synthetic_episodes=ddpm_n_synth)
 
                     # Log evaluation metrics for the ddpm
                     metrics = evaluate_buffer(policy.buffer)
@@ -285,6 +288,11 @@ def learn(*, network, env, total_timesteps,
     err_distance=0.05,
     ddpm_time_steps = 100,
     ddpm_tol = 0.05,
+    ddpm_train_start = 150,
+    ddpm_aug_start = 200,
+    ddpm_aug_freq = 20,
+    ddpm_n_train_sample = 500,
+    ddpm_n_synth = 1000,
     **kwargs
 ):
 
@@ -336,10 +344,15 @@ def learn(*, network, env, total_timesteps,
 
     ddpm = DDPM_Temporal(policy.buffer, time_steps=ddpm_time_steps, tol=ddpm_tol)
     logger.info()
-    logger.info("=== DDPM Configuration ===")
-    logger.info(" time_steps: ", ddpm_time_steps)
-    logger.info(" tolerance: ", ddpm_tol)
-    logger.info("==========================")
+    logger.info("====== DDPM Configuration =====")
+    logger.info("time_steps: ", ddpm_time_steps)
+    logger.info("tolerance: ", ddpm_tol)
+    logger.info("ddpm_train_start: ", ddpm_train_start)
+    logger.info("ddpm_aug_start: ", ddpm_aug_start)
+    logger.info("ddpm_aug_freq: ", ddpm_aug_freq)
+    logger.info("ddpm_n_train_sample: ", ddpm_n_train_sample)
+    logger.info("ddpm_n_synth: ", ddpm_n_synth)
+    logger.info("===============================")
 
     if load_path is not None:
         tf_util.load_variables(load_path)
@@ -376,7 +389,10 @@ def learn(*, network, env, total_timesteps,
         save_path=save_path, policy=policy, rollout_worker=rollout_worker,
         evaluator=evaluator, n_epochs=n_epochs, n_test_rollouts=params['n_test_rollouts'],
         n_cycles=params['n_cycles'], n_batches=params['n_batches'],
-        policy_save_interval=policy_save_interval, demo_file=demo_file,env_name=env_name, n_KER = n_KER, ddpm=ddpm)
+        policy_save_interval=policy_save_interval, demo_file=demo_file, env_name=env_name, n_KER=n_KER, ddpm=ddpm,
+        ddpm_train_start=ddpm_train_start, ddpm_aug_start=ddpm_aug_start, ddpm_aug_freq=ddpm_aug_freq,
+        ddpm_n_train_sample=ddpm_n_train_sample, ddpm_n_synth=ddpm_n_synth
+    )
 
 
 @click.command()

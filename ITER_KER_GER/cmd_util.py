@@ -179,6 +179,16 @@ def common_arg_parser():
     # Added for data augmentation with ITER-Diffusion
     parser.add_argument('--ddpm_time_steps', type=int, default=100, help='Number of diffusion steps')
     parser.add_argument('--ddpm_tol', type=float, default=0.1, help='Tolerance threshold for success categorization')
+
+    # DDPM training and augmentation configuration
+    parser.add_argument('--ddpm_train_start', type=int, default=150, help='Epoch in which DDPM starts training')
+    parser.add_argument('--ddpm_aug_start', type=int, default=200,
+                        help='Epoch in which synthetic episode injection (i.e. data augmentation) begins; has to be after ddpm_train_start')
+    parser.add_argument('--ddpm_aug_freq', type=int, default=20,
+                        help='Frequency of synthetic episode injection (in epochs)')
+    parser.add_argument('--ddpm_n_train_sample', type=int, default=500, help='Number of episodes to train DDPM with')
+    parser.add_argument('--ddpm_n_synth', type=int, default=1000,
+                        help='Number of synthetic episodes to generate each time')
     return parser
 
 def robotics_arg_parser():

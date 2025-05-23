@@ -84,6 +84,11 @@ def train(args, extra_args):
         n_GER=args.n_GER,
         ddpm_time_steps=args.ddpm_time_steps,
         ddpm_tol=args.ddpm_tol,
+        ddpm_train_start=args.ddpm_train_start,
+        ddpm_aug_start=args.ddpm_aug_start,
+        ddpm_aug_freq=args.ddpm_aug_freq,
+        ddpm_n_train_sample=args.ddpm_n_train_sample,
+        ddpm_n_synth=args.ddpm_n_synth,
         **alg_kwargs
     )
 
